@@ -1,12 +1,36 @@
 const axios = require('axios');
 
 const CONFIG = {
-  agent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/121.0',
-  allanimeRefr: 'https://allmanga.to',
+  agent: 'anime-frame/1.0.0',
+  allanimeRefr: 'https://allanime.day',
   allanimeBase: 'allanime.day',
 };
 
 CONFIG.allanimeApi = `https://api.${CONFIG.allanimeBase}`;
+CONFIG.allanimeHeaders = {
+  'Content-Type': 'application/json',
+  Accept: 'application/json',
+  'User-Agent': CONFIG.agent,
+  Referer: CONFIG.allanimeRefr,
+};
+
+const ANILIST_GRAPHQL_API = 'https://graphql.anilist.co';
+
+function isCloudflareChallengeResponse(response) {
+  if (!response || response.status !== 403) {
+    return false;
+  }
+
+  const serverHeader = String(response.headers?.server || '').toLowerCase();
+  const payload = typeof response.data === 'string' ? response.data : JSON.stringify(response.data || '');
+
+  return (
+    serverHeader.includes('cloudflare') ||
+    payload.includes('Just a moment...') ||
+    payload.includes('cf_chl_opt') ||
+    payload.includes('challenges.cloudflare.com')
+  );
+}
 
 // Decode provider ID (hex to character mapping)
 function decodeProviderId(encoded) {
@@ -85,10 +109,7 @@ async function searchAnime(query, mode = 'sub', limit = 40, page = 1) {
         variables: JSON.stringify(variables),
         query: searchGql,
       },
-      headers: {
-        'User-Agent': CONFIG.agent,
-        'Referer': CONFIG.allanimeRefr,
-      },
+      headers: CONFIG.allanimeHeaders,
     });
 
     if (!response.data || !response.data.data || !response.data.data.shows) {
@@ -122,8 +143,15 @@ async function searchAnime(query, mode = 'sub', limit = 40, page = 1) {
     }));
   } catch (error) {
     if (error.response) {
-      console.error('API Error:', error.response.status, error.response.data);
-      throw new Error(`Search failed: ${error.response.status} - ${JSON.stringify(error.response.data)}`);
+      if (isCloudflareChallengeResponse(error.response)) {
+        const blockedError = new Error('Search temporarily unavailable: upstream provider blocked this request with a Cloudflare challenge.');
+        blockedError.statusCode = 503;
+        blockedError.code = 'UPSTREAM_BLOCKED';
+        throw blockedError;
+      }
+
+      console.error('API Error:', error.response.status);
+      throw new Error(`Search failed with upstream status ${error.response.status}`);
     }
     throw new Error(`Search failed: ${error.message}`);
   }
@@ -139,10 +167,7 @@ async function getAnimeDetails(showId, mode = 'sub') {
         variables: JSON.stringify({ showId: showId }),
         query: detailsGql,
       },
-      headers: {
-        'User-Agent': CONFIG.agent,
-        'Referer': CONFIG.allanimeRefr,
-      },
+      headers: CONFIG.allanimeHeaders,
     });
 
     if (!response.data || !response.data.data || !response.data.data.show) {
@@ -217,11 +242,7 @@ async function getCompleteMetadata(showId) {
         variables: { showId }
       },
       {
-        headers: {
-          'Content-Type': 'application/json',
-          'User-Agent': CONFIG.agent,
-          'Referer': CONFIG.allanimeRefr,
-        },
+        headers: CONFIG.allanimeHeaders,
       }
     );
 
@@ -269,11 +290,7 @@ async function getIdMappings(showId) {
         variables: { showId }
       },
       {
-        headers: {
-          'Content-Type': 'application/json',
-          'User-Agent': CONFIG.agent,
-          'Referer': CONFIG.allanimeRefr,
-        },
+        headers: CONFIG.allanimeHeaders,
       }
     );
 
@@ -311,10 +328,7 @@ async function getEpisodesList(showId, mode = 'sub') {
         variables: JSON.stringify({ showId: showId }),
         query: episodesGql,
       },
-      headers: {
-        'User-Agent': CONFIG.agent,
-        'Referer': CONFIG.allanimeRefr,
-      },
+      headers: CONFIG.allanimeHeaders,
     });
 
     if (!response.data || !response.data.data || !response.data.data.show) {
@@ -337,10 +351,7 @@ async function getLinks(providerId, providerName) {
   try {
     const url = `https://${CONFIG.allanimeBase}${providerId}`;
     const response = await axios.get(url, {
-      headers: {
-        'User-Agent': CONFIG.agent,
-        'Referer': CONFIG.allanimeRefr,
-      },
+      headers: CONFIG.allanimeHeaders,
     });
 
     const data = response.data;
@@ -402,10 +413,7 @@ async function getEpisodeSources(showId, episodeNumber, mode = 'sub') {
         variables: JSON.stringify(variables),
         query: episodeGql,
       },
-      headers: {
-        'User-Agent': CONFIG.agent,
-        'Referer': CONFIG.allanimeRefr,
-      },
+      headers: CONFIG.allanimeHeaders,
     });
 
     if (!response.data || !response.data.data || !response.data.data.episode) {
@@ -511,11 +519,7 @@ async function searchByMalId(malId, mode = 'sub') {
         }
       },
       {
-        headers: {
-          'Content-Type': 'application/json',
-          'User-Agent': CONFIG.agent,
-          'Referer': CONFIG.allanimeRefr,
-        },
+        headers: CONFIG.allanimeHeaders,
       }
     );
 
@@ -554,73 +558,102 @@ async function searchByMalId(malId, mode = 'sub') {
 
 // Search anime by AniList ID (search and filter by aniListId in results)
 async function searchByAniListId(aniListId, mode = 'sub') {
-  const searchGql = `query($search: SearchInput, $limit: Int, $translationType: VaildTranslationTypeEnumType, $countryOrigin: VaildCountryOriginEnumType) {
-    shows(search: $search, limit: $limit, translationType: $translationType, countryOrigin: $countryOrigin) {
-      edges {
-        _id
-        name
-        englishName
-        malId
-        aniListId
-        availableEpisodesDetail
-      }
-    }
-  }`;
+  const targetAniListId = aniListId.toString();
 
-  try {
-    // First, get all shows and filter by aniListId client-side
-    const response = await axios.post(`${CONFIG.allanimeApi}/api`, 
-      { 
-        query: searchGql,
-        variables: {
-          search: {
-            allowAdult: false,
-            allowUnknown: true
-          },
-          limit: 100,
-          translationType: mode,
-          countryOrigin: 'ALL'
+  const toMappedResult = (show) => ({
+    id: show.id || show._id,
+    name: show.name,
+    englishName: show.englishName,
+    malId: show.malId,
+    aniListId: show.aniListId,
+    availableEpisodesDetail: show.availableEpisodesDetail,
+  });
+
+  const findMatchesByTitle = async (title) => {
+    if (!title || !title.trim()) {
+      return [];
+    }
+
+    const titleResults = await searchAnime(title, mode, 50, 1);
+    const filtered = titleResults.filter(
+      (show) => show.aniListId && show.aniListId.toString() === targetAniListId
+    );
+
+    return filtered.map(toMappedResult);
+  };
+
+  const getAniListTitles = async () => {
+    const parsedId = Number.parseInt(targetAniListId, 10);
+    if (Number.isNaN(parsedId)) {
+      return [];
+    }
+
+    const aniListQuery = `query ($id: Int) {
+      Media(id: $id, type: ANIME) {
+        title {
+          romaji
+          english
+          native
         }
+      }
+    }`;
+
+    const response = await axios.post(
+      ANILIST_GRAPHQL_API,
+      {
+        query: aniListQuery,
+        variables: { id: parsedId },
       },
       {
         headers: {
           'Content-Type': 'application/json',
-          'User-Agent': CONFIG.agent,
-          'Referer': CONFIG.allanimeRefr,
+          'Accept': 'application/json',
         },
       }
     );
 
-    if (!response.data || !response.data.data || !response.data.data.shows) {
-      console.error('Search response:', JSON.stringify(response.data, null, 2));
-      throw new Error('Invalid response from API');
+    const titleObj = response.data?.data?.Media?.title;
+    if (!titleObj) {
+      return [];
     }
 
-    const shows = response.data.data.shows.edges;
-    
-    // Filter by aniListId client-side
-    const filtered = shows.filter(show => show.aniListId && show.aniListId.toString() === aniListId.toString());
-    
-    console.log(`Found ${filtered.length} shows for AniList ID ${aniListId}`);
-    
-    if (filtered.length === 0) {
-      throw new Error('No anime found with this AniList ID');
+    return [...new Set([titleObj.romaji, titleObj.english, titleObj.native].filter(Boolean))];
+  };
+
+  try {
+    const titles = await getAniListTitles();
+
+    for (const title of titles) {
+      const matches = await findMatchesByTitle(title);
+      if (matches.length > 0) {
+        console.log(`Found ${matches.length} shows for AniList ID ${aniListId}`);
+        return matches;
+      }
     }
 
-    return filtered.map(show => ({
-      id: show._id,
-      name: show.name,
-      englishName: show.englishName,
-      malId: show.malId,
-      aniListId: show.aniListId,
-      availableEpisodesDetail: show.availableEpisodesDetail,
-    }));
+    console.log(`Found 0 shows for AniList ID ${aniListId}`);
+    throw new Error('No anime found with this AniList ID');
   } catch (error) {
     if (error.response) {
       console.error('API Error:', error.response.status, error.response.data);
       throw new Error(`Failed to search by AniList ID: ${error.response.status}`);
     }
     throw new Error(`Failed to search by AniList ID: ${error.message}`);
+  }
+}
+
+// Get a full anime page payload by AniList ID
+async function getAnimePageByAniListId(aniListId, mode = 'sub') {
+  try {
+    const results = await searchByAniListId(aniListId, mode);
+
+    if (!results || results.length === 0) {
+      throw new Error(`No anime found with AniList ID: ${aniListId}`);
+    }
+
+    return await getCompleteMetadata(results[0].id);
+  } catch (error) {
+    throw new Error(`Failed to get anime page by AniList ID: ${error.message}`);
   }
 }
 
@@ -636,4 +669,5 @@ module.exports = {
   getCompleteMetadata,
   getMetadataByExternalId,
   getIdMappings,
+  getAnimePageByAniListId,
 };

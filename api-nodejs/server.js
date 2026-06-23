@@ -30,6 +30,7 @@ app.get('/', (req, res) => {
       malSearch: '/api/mal/:malId?mode=<sub|dub>',
       malEpisodes: '/api/mal/:malId/episodes?mode=<sub|dub>',
       anilistSearch: '/api/anilist/:aniListId?mode=<sub|dub>',
+      anilistAnimePage: '/api/anilist/:aniListId/anime?mode=<sub|dub>',
       anilistEpisodes: '/api/anilist/:aniListId/episodes?mode=<sub|dub>',
       metadata: '/api/metadata/:id - Complete metadata (genres, studios, etc)',
       metadataByMal: '/api/metadata/mal/:malId - Metadata via MAL ID',
@@ -41,9 +42,20 @@ app.get('/', (req, res) => {
 
 // Error handling
 app.use((err, req, res, next) => {
-  console.error(err.stack);
-  res.status(500).json({
+  const statusCode = Number.isInteger(err.statusCode) ? err.statusCode : 500;
+  const errorCode = err.code || (statusCode === 500 ? 'INTERNAL_ERROR' : 'REQUEST_FAILED');
+
+  if (statusCode >= 500) {
+    console.error(`[${errorCode}] ${err.message}`);
+  }
+
+  if (process.env.NODE_ENV !== 'production' && statusCode === 500 && err.stack) {
+    console.error(err.stack);
+  }
+
+  res.status(statusCode).json({
     error: true,
+    code: errorCode,
     message: err.message || 'Internal server error',
   });
 });

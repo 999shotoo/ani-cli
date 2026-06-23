@@ -2,8 +2,15 @@ const axios = require('axios');
 
 const CONFIG = {
   allanimeApi: 'https://api.allanime.day',
-  allanimeRefr: 'https://allanime.to',
-  agent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+  allanimeRefr: 'https://allanime.day',
+  agent: 'anime-frame/1.0.0',
+};
+
+const ALLANIME_HEADERS = {
+  'Content-Type': 'application/json',
+  Accept: 'application/json',
+  'User-Agent': CONFIG.agent,
+  Referer: CONFIG.allanimeRefr,
 };
 
 // Comprehensive GraphQL query for ALL metadata
@@ -246,11 +253,7 @@ async function getCompleteMetadata(animeId) {
         variables: { id: animeId }
       },
       {
-        headers: {
-          'Content-Type': 'application/json',
-          'User-Agent': CONFIG.agent,
-          'Referer': CONFIG.allanimeRefr,
-        },
+        headers: ALLANIME_HEADERS,
       }
     );
 
@@ -275,11 +278,7 @@ async function getMetadataByExternalId(externalId, idType = 'mal') {
     const response = await axios.post(`${CONFIG.allanimeApi}/api`, 
       { query: searchQuery },
       {
-        headers: {
-          'Content-Type': 'application/json',
-          'User-Agent': CONFIG.agent,
-          'Referer': CONFIG.allanimeRefr,
-        },
+        headers: ALLANIME_HEADERS,
       }
     );
 
@@ -345,11 +344,7 @@ async function advancedSearch(filters = {}) {
         }
       },
       {
-        headers: {
-          'Content-Type': 'application/json',
-          'User-Agent': CONFIG.agent,
-          'Referer': CONFIG.allanimeRefr,
-        },
+        headers: ALLANIME_HEADERS,
       }
     );
 
@@ -381,11 +376,7 @@ async function getAvailableGenresAndTags() {
     const response = await axios.post(`${CONFIG.allanimeApi}/api`, 
       { query },
       {
-        headers: {
-          'Content-Type': 'application/json',
-          'User-Agent': CONFIG.agent,
-          'Referer': CONFIG.allanimeRefr,
-        },
+        headers: ALLANIME_HEADERS,
       }
     );
 
@@ -423,11 +414,7 @@ async function getCharactersByAniListId(aniListId) {
         variables: { aniListId: parseInt(aniListId) }
       },
       {
-        headers: {
-          'Content-Type': 'application/json',
-          'User-Agent': CONFIG.agent,
-          'Referer': CONFIG.allanimeRefr,
-        },
+        headers: ALLANIME_HEADERS,
       }
     );
 
@@ -458,11 +445,7 @@ async function getIdMappings(animeId) {
         variables: { id: animeId }
       },
       {
-        headers: {
-          'Content-Type': 'application/json',
-          'User-Agent': CONFIG.agent,
-          'Referer': CONFIG.allanimeRefr,
-        },
+        headers: ALLANIME_HEADERS,
       }
     );
 
@@ -510,11 +493,7 @@ async function batchGetMetadata(animeIds) {
         variables: { ids: animeIds }
       },
       {
-        headers: {
-          'Content-Type': 'application/json',
-          'User-Agent': CONFIG.agent,
-          'Referer': CONFIG.allanimeRefr,
-        },
+        headers: ALLANIME_HEADERS,
       }
     );
 

@@ -179,6 +179,29 @@ router.get('/anilist/:aniListId', async (req, res, next) => {
   }
 });
 
+// Get single anime page data by AniList ID
+router.get('/anilist/:aniListId/anime', async (req, res, next) => {
+  try {
+    const { aniListId } = req.params;
+    const { mode = 'sub' } = req.query;
+
+    const anime = await animeService.getAnimePageByAniListId(aniListId, mode);
+
+    res.json({
+      success: true,
+      data: anime,
+    });
+  } catch (error) {
+    if (error.message && error.message.includes('No anime found')) {
+      return res.status(404).json({
+        success: false,
+        error: 'No anime found with this AniList ID',
+      });
+    }
+    next(error);
+  }
+});
+
 // Get episodes by AniList ID
 router.get('/anilist/:aniListId/episodes', async (req, res, next) => {
   try {

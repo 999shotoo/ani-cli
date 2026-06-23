@@ -209,7 +209,41 @@ GET /api/anilist/20/episodes?mode=sub
 }
 ```
 
-### 6. Get Anime Details
+### 6. Get Anime Page by AniList ID
+
+**Endpoint:** `GET /anilist/:aniListId/anime`
+
+**Parameters:**
+- `aniListId` (required): AniList ID
+- `mode` (optional): `sub` or `dub` (default: `sub`)
+
+**Example:**
+```bash
+GET /api/anilist/20/anime?mode=sub
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "_id": "allanime_id",
+    "name": "Naruto",
+    "englishName": "Naruto",
+    "description": "...",
+    "malId": 20,
+    "aniListId": 20,
+    "genres": ["Action", "Adventure"],
+    "studios": ["Pierrot"],
+    "availableEpisodesDetail": {
+      "sub": ["1", "2", "3", "..."],
+      "dub": ["1", "2", "..."]
+    }
+  }
+}
+```
+
+### 7. Get Anime Details
 
 **Endpoint:** `GET /anime/:id`
 
