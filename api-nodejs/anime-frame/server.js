@@ -305,81 +305,67 @@ async function getProviderLinks(providerPath, sourceName) {
 
 // ─── Episode sources API request ──────────────────────────────────────────────
 
-const EPISODE_QUERY = `query ($showId: String!, $translationType: VaildTranslationTypeEnumType!, $episodeString: String!) {
-  episode(showId: $showId translationType: $translationType episodeString: $episodeString) {
-    episodeString sourceUrls
-  }
-}`;
-
-function hasUsableData(data) {
-  if (!data) return false;
-  const raw = JSON.stringify(data);
-  return raw.includes('sourceUrls') || raw.includes('tobeparsed') || raw.includes('"_m"');
-}
+// Minimal headers that match ani-cli / the working GitHub script exactly.
+// Extra headers (Accept-Encoding, DNT, Connection, Content-Type on GET) are
+// what cause the API to respond with NEED_CAPTCHA.
+const EPISODE_HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:150.0) Gecko/20100101 Firefox/150.0',
+  Referer: YOUTU_CHAN_REFERER,
+  Origin: YOUTU_CHAN_REFERER,
+};
 
 async function requestAllanimeEpisodeSources(showId, mode, episode) {
   const variables = { showId, translationType: mode, episodeString: String(episode) };
-  const extensions = { persistedQuery: { version: 1, sha256Hash: ALLANIME_EPISODE_QUERY_HASH } };
+  const extensions = {
+    persistedQuery: { version: 1, sha256Hash: ALLANIME_EPISODE_QUERY_HASH },
+  };
 
-  const uaFirefox = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:150.0) Gecko/20100101 Firefox/150.0';
-  const uaChrome  = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
+  // Try persisted-query GET first (bypasses captcha per ani-cli v4.14.0)
+  try {
+    const getResponse = await axios.get(ALLANIME_API, {
+      params: {
+        variables: JSON.stringify(variables),
+        extensions: JSON.stringify(extensions),
+      },
+      headers: EPISODE_HEADERS,
+      timeout: 8000,
+    });
 
-  // Strategy 1: persisted GET with various referer/UA combos
-  const getAttempts = [
-    [uaFirefox, 'https://youtu-chan.com'],
-    [uaFirefox, 'https://allanime.day'],
-    [uaChrome,  'https://allmanga.to'],
-  ];
-
-  for (const [ua, ref] of getAttempts) {
-    try {
-      const res = await axios.get(ALLANIME_API, {
-        params: {
-          variables: JSON.stringify(variables),
-          extensions: JSON.stringify(extensions),
-        },
-        headers: { 'User-Agent': ua, Referer: ref, Origin: ref },
-        timeout: 8000,
-      });
-      const shape = JSON.stringify(res.data).substring(0, 120);
-      console.log(`[REQUEST] GET ${ref} -> ${res.status} | ${shape}`);
-      if (hasUsableData(res.data)) return res.data;
-    } catch (e) {
-      console.log(`[REQUEST] GET ${ref} failed: ${e.response?.status || e.message}`);
-      if (e.response?.data) console.log('  body:', JSON.stringify(e.response.data).substring(0, 150));
+    const raw = JSON.stringify(getResponse.data);
+    if (raw.includes('tobeparsed') || raw.includes('"_m"') || raw.includes('sourceUrls')) {
+      console.log('[REQUEST] GET succeeded');
+      return getResponse.data;
     }
+    // If we got data but none of the expected keys, log it so we can debug
+    console.log('[REQUEST] GET returned unexpected shape:', raw.substring(0, 200));
+  } catch (e) {
+    console.log('[REQUEST] GET failed:', e.message);
   }
 
-  // Strategy 2: POST fallback
-  const postAttempts = [
-    [uaFirefox, 'https://youtu-chan.com'],
-    [uaChrome,  'https://allmanga.to'],
-    [uaFirefox, 'https://allanime.day'],
-  ];
-
-  let lastData = null;
-  for (const [ua, ref] of postAttempts) {
-    try {
-      const res = await axios.post(ALLANIME_API, { variables, query: EPISODE_QUERY }, {
-        headers: { 'User-Agent': ua, Referer: ref, Origin: ref, 'Content-Type': 'application/json' },
-        timeout: 8000,
-      });
-      const shape = JSON.stringify(res.data).substring(0, 120);
-      console.log(`[REQUEST] POST ${ref} -> ${res.status} | ${shape}`);
-      lastData = res.data;
-      if (hasUsableData(res.data)) return res.data;
-    } catch (e) {
-      console.log(`[REQUEST] POST ${ref} failed: ${e.response?.status || e.message}`);
-      if (e.response?.data) {
-        console.log('  body:', JSON.stringify(e.response.data).substring(0, 150));
-        lastData = e.response.data;
-      }
+  // POST fallback — use the same minimal headers, no extra Content-Type cruft
+  console.log('[REQUEST] Falling back to POST...');
+  const postResponse = await axios.post(
+    ALLANIME_API,
+    {
+      variables,
+      query: `query ($showId: String!, $translationType: VaildTranslationTypeEnumType!, $episodeString: String!) {
+        episode(showId: $showId translationType: $translationType episodeString: $episodeString) {
+          episodeString sourceUrls
+        }
+      }`,
+    },
+    {
+      headers: {
+        ...EPISODE_HEADERS,
+        'Content-Type': 'application/json', // required for POST body
+      },
+      timeout: 8000,
     }
-  }
+  );
 
-  // Return whatever we have so the route can surface the real error
-  console.log('[REQUEST] All strategies exhausted. Last data:', JSON.stringify(lastData).substring(0, 300));
-  return lastData || { errors: [{ message: 'All request strategies failed' }] };
+  const raw = JSON.stringify(postResponse.data);
+  console.log('[REQUEST] POST response shape:', raw.substring(0, 200));
+  return postResponse.data;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
